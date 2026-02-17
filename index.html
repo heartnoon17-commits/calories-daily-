@@ -1,20 +1,526 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="th" class="h-full">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Calories Daily</title>
-  <link rel="stylesheet" href="style.css">
+
+  <!-- ✅ จุดสำคัญ 1: Tailwind CDN (ต้องอยู่ใน head) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Tailwind Config (โทนสีสุขภาพ + Dark mode) -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              green: '#22c55e',
+              blue: '#38bdf8',
+              dark: '#0b1220',
+            }
+          },
+          boxShadow: {
+            soft: '0 10px 30px rgba(2, 132, 199, 0.12)',
+          },
+          keyframes: {
+            floaty: { '0%,100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-4px)' } }
+          },
+          animation: {
+            floaty: 'floaty 3s ease-in-out infinite'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- ✅ จุดสำคัญ 2: Chart.js CDN (ต้องอยู่ใน head) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- ✅ จุดสำคัญ 3: ลิงก์ไฟล์ CSS -->
+  <link rel="stylesheet" href="./style.css" />
 </head>
-<body>
 
-  <h1>Calories Daily</h1>
+<body class="h-full bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors">
 
-  <div class="card">
-    <p id="msg">กำลังโหลด...</p>
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div class="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-soft w-[320px] text-center">
+      <div class="mx-auto mb-3 h-10 w-10 rounded-full border-4 border-slate-200 dark:border-slate-700 border-t-brand-blue animate-spin"></div>
+      <p class="font-semibold">กำลังโหลด...</p>
+      <p class="text-sm text-slate-500 dark:text-slate-400">Calories Daily</p>
+    </div>
   </div>
 
-  <script src="firebase.js"></script>
-  <script src="app.js"></script>
+  <!-- Toast -->
+  <div id="toast" class="fixed z-50 right-4 bottom-4 hidden max-w-sm rounded-xl px-4 py-3 shadow-soft bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60">
+    <div class="flex items-start gap-3">
+      <div id="toastDot" class="mt-1.5 h-2.5 w-2.5 rounded-full bg-brand-green"></div>
+      <div class="flex-1">
+        <p id="toastTitle" class="font-semibold">สำเร็จ</p>
+        <p id="toastMsg" class="text-sm text-slate-500 dark:text-slate-400">บันทึกข้อมูลเรียบร้อย</p>
+      </div>
+      <button id="toastClose" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+    </div>
+  </div>
 
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/70 dark:bg-slate-950/60 backdrop-blur">
+    <div class="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-2xl bg-gradient-to-br from-brand-green to-brand-blue shadow-soft animate-floaty"></div>
+        <div>
+          <h1 class="text-lg font-extrabold leading-tight">Calories Daily</h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">คำนวณ • ตั้งเป้า • ติดตามแคลอรี่รายวัน</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btnTheme" class="btn-secondary">
+          <span id="themeIcon">🌙</span>
+          <span class="hidden sm:inline">Dark</span>
+        </button>
+
+        <div id="authArea" class="flex items-center gap-2">
+          <button id="btnGoAuth" class="btn-primary">เข้าสู่ระบบ</button>
+        </div>
+
+        <div id="userArea" class="hidden items-center gap-2">
+          <div class="hidden sm:flex flex-col items-end">
+            <span id="userEmail" class="text-sm font-semibold"></span>
+            <span id="userHint" class="text-xs text-slate-500 dark:text-slate-400">ออนไลน์</span>
+          </div>
+          <button id="btnLogout" class="btn-secondary">ออกจากระบบ</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="mx-auto max-w-6xl px-4 py-6">
+
+    <!-- NAV (SPA) -->
+    <div class="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <button data-route="dashboard" class="nav-pill active">แดชบอร์ด</button>
+      <button data-route="calc" class="nav-pill">คำนวณ BMR/TDEE</button>
+      <button data-route="track" class="nav-pill">ติดตามวันนี้</button>
+      <button data-route="foods" class="nav-pill">แนะนำอาหาร</button>
+    </div>
+
+    <!-- AUTH VIEW -->
+    <section id="viewAuth" class="view hidden">
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div class="card">
+          <h2 class="card-title">สมัครสมาชิก</h2>
+          <p class="card-subtitle">เริ่มใช้งาน Calories Daily ด้วยอีเมลของคุณ</p>
+
+          <div class="mt-5 space-y-3">
+            <div>
+              <label class="label">Email</label>
+              <input id="signupEmail" class="input" type="email" placeholder="you@example.com" />
+            </div>
+            <div>
+              <label class="label">Password</label>
+              <input id="signupPass" class="input" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" />
+            </div>
+            <button id="btnSignup" class="btn-primary w-full">สมัครสมาชิก</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">เข้าสู่ระบบ</h2>
+          <p class="card-subtitle">กลับมาต่อให้ถึงเป้าหมายของคุณ</p>
+
+          <div class="mt-5 space-y-3">
+            <div>
+              <label class="label">Email</label>
+              <input id="loginEmail" class="input" type="email" placeholder="you@example.com" />
+            </div>
+            <div>
+              <label class="label">Password</label>
+              <input id="loginPass" class="input" type="password" placeholder="••••••••" />
+            </div>
+            <button id="btnLogin" class="btn-primary w-full">เข้าสู่ระบบ</button>
+          </div>
+
+          <div class="mt-4 rounded-xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-slate-50 dark:bg-slate-900/40">
+            <p class="text-sm text-slate-600 dark:text-slate-300">
+              ✅ ปิดเว็บแล้วเปิดใหม่ “ยังล็อกอินอยู่” เพราะ Firebase Auth มี session ให้ และเรามี LocalStorage cache ช่วยโหลดเร็วขึ้น
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DASHBOARD VIEW -->
+    <section id="viewDashboard" class="view">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="card lg:col-span-2">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h2 class="card-title">สรุปของวันนี้</h2>
+              <p class="card-subtitle">ติดตามแคลอรี่สะสมและสัดส่วนสารอาหาร</p>
+            </div>
+            <div class="text-right">
+              <p class="text-xs text-slate-500 dark:text-slate-400">วันที่</p>
+              <p id="todayStr" class="font-extrabold"></p>
+            </div>
+          </div>
+
+          <div class="mt-5 grid sm:grid-cols-3 gap-3">
+            <div class="stat">
+              <p class="stat-label">เป้าหมาย (kcal)</p>
+              <p id="statTarget" class="stat-value">—</p>
+              <p id="statGoalHint" class="stat-hint">ตั้งเป้าในหน้า “คำนวณ BMR/TDEE”</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">กินแล้ว (kcal)</p>
+              <p id="statEaten" class="stat-value">0</p>
+              <p class="stat-hint">อัปเดตจากรายการอาหารวันนี้</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">คงเหลือ (kcal)</p>
+              <p id="statRemain" class="stat-value">—</p>
+              <p class="stat-hint">เป้าหมาย - กินแล้ว</p>
+            </div>
+          </div>
+
+          <div class="mt-5">
+            <div class="flex items-center justify-between mb-2">
+              <p class="font-semibold">ความคืบหน้า</p>
+              <p id="progressText" class="text-sm text-slate-500 dark:text-slate-400">0%</p>
+            </div>
+            <div class="h-3 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div id="progressBar" class="h-full w-0 bg-gradient-to-r from-brand-green to-brand-blue transition-all"></div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid md:grid-cols-2 gap-6 items-center">
+            <div>
+              <h3 class="font-extrabold text-lg">Macros (โดยประมาณ)</h3>
+              <p class="text-sm text-slate-500 dark:text-slate-400">จากรายการอาหารที่เพิ่มในวันนี้</p>
+
+              <div class="mt-4 grid grid-cols-3 gap-3">
+                <div class="mini-stat">
+                  <p class="mini-label">โปรตีน</p>
+                  <p id="mProtein" class="mini-value">0g</p>
+                </div>
+                <div class="mini-stat">
+                  <p class="mini-label">คาร์บ</p>
+                  <p id="mCarb" class="mini-value">0g</p>
+                </div>
+                <div class="mini-stat">
+                  <p class="mini-label">ไขมัน</p>
+                  <p id="mFat" class="mini-value">0g</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-white dark:bg-slate-900/40">
+              <canvas id="macroChart" height="220"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">โปรไฟล์ & เป้าหมาย</h2>
+          <p class="card-subtitle">ข้อมูลนี้จะถูกบันทึกใน Firestore</p>
+
+          <div class="mt-5 space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div class="mini-stat">
+                <p class="mini-label">BMR</p>
+                <p id="dashBmr" class="mini-value">—</p>
+              </div>
+              <div class="mini-stat">
+                <p class="mini-label">TDEE</p>
+                <p id="dashTdee" class="mini-value">—</p>
+              </div>
+            </div>
+
+            <div id="goalBox" class="rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800/70 bg-slate-50 dark:bg-slate-900/40">
+              <p class="font-extrabold" id="goalTitle">ยังไม่ได้ตั้งเป้าหมาย</p>
+              <p class="text-sm text-slate-500 dark:text-slate-400" id="goalDesc">
+                ไปที่หน้า “คำนวณ BMR/TDEE” เพื่อกำหนดเป้าหมาย (ลด/เพิ่ม/รักษา)
+              </p>
+            </div>
+
+            <button id="btnQuickToCalc" class="btn-primary w-full">ไปตั้งค่า BMR/TDEE</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CALC VIEW -->
+    <section id="viewCalc" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="card lg:col-span-2">
+          <h2 class="card-title">คำนวณ BMR และ TDEE</h2>
+          <p class="card-subtitle">สูตร Mifflin-St Jeor + ระดับกิจกรรม</p>
+
+          <div class="mt-5 grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label">เพศ</label>
+              <select id="gender" class="input">
+                <option value="male">ชาย</option>
+                <option value="female">หญิง</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="label">อายุ (ปี)</label>
+              <input id="age" class="input" type="number" min="1" placeholder="เช่น 20" />
+            </div>
+
+            <div>
+              <label class="label">ส่วนสูง (cm)</label>
+              <input id="height" class="input" type="number" min="1" placeholder="เช่น 170" />
+            </div>
+
+            <div>
+              <label class="label">น้ำหนัก (kg)</label>
+              <input id="weight" class="input" type="number" min="1" step="0.1" placeholder="เช่น 65" />
+            </div>
+
+            <div class="sm:col-span-2">
+              <label class="label">ระดับกิจกรรม</label>
+              <select id="activity" class="input">
+                <option value="1.2">ไม่ออกกำลังกาย (1.2)</option>
+                <option value="1.375">ออกกำลังกายเล็กน้อย (1.375)</option>
+                <option value="1.55">ปานกลาง (1.55)</option>
+                <option value="1.725">หนัก (1.725)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mt-5 flex flex-col sm:flex-row gap-3">
+            <button id="btnCalc" class="btn-primary">คำนวณ</button>
+            <button id="btnSaveProfile" class="btn-secondary">บันทึกโปรไฟล์</button>
+          </div>
+
+          <div class="mt-6 grid sm:grid-cols-2 gap-4">
+            <div class="stat">
+              <p class="stat-label">BMR (kcal/วัน)</p>
+              <p id="outBmr" class="stat-value">—</p>
+              <p class="stat-hint">พลังงานขั้นต่ำที่ร่างกายใช้</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">TDEE (kcal/วัน)</p>
+              <p id="outTdee" class="stat-value">—</p>
+              <p class="stat-hint">พลังงานรวมตามกิจกรรม</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">ตั้งเป้าหมาย</h2>
+          <p class="card-subtitle">ระบบจะแนะนำแคลอรี่ต่อวันจาก TDEE</p>
+
+          <div class="mt-5 space-y-3">
+            <label class="label">เป้าหมาย</label>
+            <select id="goalType" class="input">
+              <option value="maintain">รักษาน้ำหนัก</option>
+              <option value="cut">ลดน้ำหนัก</option>
+              <option value="bulk">เพิ่มน้ำหนัก</option>
+            </select>
+
+            <label class="label">ปรับแคลอรี่ (kcal)</label>
+            <select id="goalDelta" class="input">
+              <option value="300">300</option>
+              <option value="400">400</option>
+              <option value="500">500</option>
+            </select>
+
+            <button id="btnApplyGoal" class="btn-primary w-full">คำนวณเป้าหมาย</button>
+            <button id="btnSaveGoal" class="btn-secondary w-full">บันทึกเป้าหมาย</button>
+
+            <div id="goalPreview" class="rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800/70 bg-slate-50 dark:bg-slate-900/40">
+              <p class="font-extrabold" id="goalPreviewTitle">ยังไม่ได้คำนวณ</p>
+              <p class="text-sm text-slate-500 dark:text-slate-400" id="goalPreviewDesc">กรุณาคำนวณ TDEE ก่อน</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRACK VIEW -->
+    <section id="viewTrack" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="card lg:col-span-2">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h2 class="card-title">ติดตามแคลอรี่รายวัน</h2>
+              <p class="card-subtitle">เพิ่มรายการอาหารวันนี้ แล้วระบบจะบันทึกลง Firestore ตาม user + วันที่</p>
+            </div>
+            <button id="btnReloadToday" class="btn-secondary">รีเฟรช</button>
+          </div>
+
+          <div class="mt-5 grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label">ชื่ออาหาร</label>
+              <input id="foodName" class="input" placeholder="เช่น อกไก่ย่าง" />
+            </div>
+            <div>
+              <label class="label">แคลอรี่ (kcal)</label>
+              <input id="foodCal" class="input" type="number" min="0" placeholder="เช่น 250" />
+            </div>
+
+            <div>
+              <label class="label">โปรตีน (g)</label>
+              <input id="foodP" class="input" type="number" min="0" step="0.1" placeholder="เช่น 30" />
+            </div>
+            <div>
+              <label class="label">คาร์บ (g)</label>
+              <input id="foodC" class="input" type="number" min="0" step="0.1" placeholder="เช่น 10" />
+            </div>
+
+            <div class="sm:col-span-2">
+              <label class="label">ไขมัน (g)</label>
+              <input id="foodF" class="input" type="number" min="0" step="0.1" placeholder="เช่น 8" />
+            </div>
+          </div>
+
+          <div class="mt-5 flex flex-col sm:flex-row gap-3">
+            <button id="btnAddFood" class="btn-primary">เพิ่มรายการ</button>
+            <button id="btnClearToday" class="btn-danger">ล้างรายการวันนี้</button>
+          </div>
+
+          <div class="mt-6">
+            <h3 class="font-extrabold text-lg">รายการวันนี้</h3>
+            <div id="todayList" class="mt-3 space-y-3"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">เป้าหมายวันนี้</h2>
+          <p class="card-subtitle">Progress จะคำนวณจาก Target kcal</p>
+
+          <div class="mt-5 space-y-4">
+            <div class="stat">
+              <p class="stat-label">Target (kcal)</p>
+              <p id="trackTarget" class="stat-value">—</p>
+              <p class="stat-hint">ตั้งในหน้า BMR/TDEE</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">รวมวันนี้ (kcal)</p>
+              <p id="trackTotal" class="stat-value">0</p>
+              <p class="stat-hint">รวมจากรายการอาหาร</p>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="font-semibold">Progress</p>
+                <p id="trackProgressText" class="text-sm text-slate-500 dark:text-slate-400">0%</p>
+              </div>
+              <div class="h-3 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                <div id="trackProgressBar" class="h-full w-0 bg-gradient-to-r from-brand-green to-brand-blue transition-all"></div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-slate-50 dark:bg-slate-900/40">
+              <p class="font-extrabold">ทิปพรีเมียม</p>
+              <p class="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                ใช้ “แนะนำอาหาร” เพื่อเลือกเมนูเร็วขึ้น แล้วนำค่ามาเพิ่มในวันนี้ได้เลย
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOODS VIEW -->
+    <section id="viewFoods" class="view hidden">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="card lg:col-span-2">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h2 class="card-title">ระบบแนะนำอาหารจำนวนมาก</h2>
+              <p class="card-subtitle">แบ่งหมวดหมู่ + แคลอรี่โดยประมาณ + มี “สุ่มเมนู 1 วัน”</p>
+            </div>
+            <button id="btnRandomDay" class="btn-primary">สุ่มเมนู 1 วัน</button>
+          </div>
+
+          <div class="mt-4">
+            <input id="foodSearch" class="input" placeholder="ค้นหา เช่น ข้าวมันไก่ / ไข่ / salmon ..." />
+          </div>
+
+          <div id="foodCatalog" class="mt-5 space-y-5"></div>
+        </div> <div id="foodCatalog" class="mt-5 space-y-5"></div>
+        <!-- Photo to Calories (MVP) -->
+<div class="mt-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-white dark:bg-slate-900/40">
+  <div class="flex items-center justify-between gap-3">
+    <div>
+      <p class="font-extrabold">ถ่ายรูปอาหาร → ประเมินแคลอรี่</p>
+      <p class="text-sm text-slate-500 dark:text-slate-400">เลือกเมนู + ขนาด (S/M/L)</p>
+    </div>
+
+    <input id="foodPhotoInput" type="file" accept="image/*" capture="environment" class="hidden" />
+    <button id="btnPickPhoto" class="btn-secondary">ถ่ายรูป/เลือกรูป</button>
+  </div>
+
+  <div id="photoPreviewWrap" class="mt-4 hidden">
+    <img id="foodPhotoPreview"
+         class="w-full max-h-64 object-cover rounded-xl border border-slate-200/70 dark:border-slate-800/70" />
+  </div>
+
+  <div id="photoResultWrap" class="mt-4 hidden">
+    <p class="font-extrabold mb-2">เมนูที่เลือกเพิ่มได้</p>
+    <div id="photoCandidates" class="grid sm:grid-cols-2 gap-3"></div>
+  </div>
+</div>
+
+
+<!-- ✅ วางกล่องถ่ายรูปตรงนี้ (ยังอยู่ในการ์ดใหญ่ใบแรก) -->
+<div class="mt-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-white dark:bg-slate-900/40">
+  <div class="flex items-center justify-between gap-3">
+    <div>
+      <p class="font-extrabold">ถ่ายรูปอาหาร → ประเมินแคลอรี่</p>
+      <p class="text-sm text-slate-500 dark:text-slate-400">ระบบจะเดาเมนูให้ แล้วให้คุณเลือกขนาด</p>
+    </div>
+    <input id="foodPhotoInput" type="file" accept="image/*" capture="environment" class="hidden" />
+    <button id="btnPickPhoto" class="btn-secondary">ถ่ายรูป/เลือกรูป</button>
+  </div>
+
+  <div id="photoPreviewWrap" class="mt-4 hidden">
+    <img id="foodPhotoPreview" class="w-full max-h-64 object-cover rounded-xl border border-slate-200/70 dark:border-slate-800/70" />
+  </div>
+
+  <div id="photoResultWrap" class="mt-4 hidden">
+    <p class="font-extrabold mb-2">เมนูที่คาดว่าใช่</p>
+    <div id="photoCandidates" class="grid sm:grid-cols-2 gap-3"></div>
+  </div>
+</div>
+
+</div> <!-- ปิดการ์ดใหญ่ใบแรก -->
+
+
+        <div class="card">
+          <h2 class="card-title">เมนูสุ่มวันนี้</h2>
+          <p class="card-subtitle">คัดลอกชื่อ/แคลอรี่ไปเพิ่มในหน้าติดตามได้</p>
+
+          <div id="randomBox" class="mt-5 space-y-3"></div>
+
+          <div class="mt-4 rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-slate-50 dark:bg-slate-900/40">
+            <p class="text-sm text-slate-600 dark:text-slate-300">
+              * หมายเหตุ: แคลอรี่เป็น “ค่าประมาณ” ขึ้นกับปริมาณและวิธีปรุง
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Not logged in banner -->
+    <div id="mustLogin" class="hidden mt-6 rounded-2xl border border-slate-200/70 dark:border-slate-800/70 p-4 bg-white dark:bg-slate-900/40">
+      <p class="font-extrabold">กรุณาเข้าสู่ระบบ</p>
+      <p class="text-sm text-slate-600 dark:text-slate-300">เพื่อบันทึกข้อมูลลง Firestore และซิงก์ข้ามอุปกรณ์</p>
+      <button id="btnGoAuth2" class="btn-primary mt-3">ไปหน้าเข้าสู่ระบบ</button>
+    </div>
+
+  </main>
+
+  <!-- ✅ จุดสำคัญ 4: โหลดไฟล์ JS แบบ module (ต้องอยู่ก่อนปิด body) -->
+  <script type="module" src="./firebase.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
